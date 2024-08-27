@@ -1,40 +1,30 @@
 from math import sqrt
 import os
-# os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-# import torchvision
+import torchvision
 import torch.optim
 import argparse
-
 import dataloader_prompt_margin
 import dataloader_prompt_add
-import dataloader_images as dataloader_sharp 
-
+import dataloader_images as dataloader_sharp
 import model_small
-
 import numpy as np
-
 from test_function import inference
-
 import clip_score
 import random
 from collections import OrderedDict
 from torch.utils.tensorboard import SummaryWriter
 import clip
-
 import pyiqa
 import shutil
-
 task_name="train0"
 writer = SummaryWriter('./'+task_name+"/"+'tensorboard_'+task_name)
-
 dstpath="./"+task_name+"/"+"train_scripts"
 if not os.path.exists(dstpath):
     os.makedirs(dstpath)
-shutil.copy("train.py",dstpath)
-
+shutil.copy(src="train.py",dst=dstpath)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 #load clip
@@ -42,7 +32,6 @@ model, preprocess = clip.load("ViT-B/32", device=torch.device("cpu"), download_r
 model.to(device)
 for para in model.parameters():
     para.requires_grad = False
-
 class TextEncoder(nn.Module):
     def __init__(self, clip_model):
         super().__init__()
@@ -51,20 +40,14 @@ class TextEncoder(nn.Module):
         self.ln_final = clip_model.ln_final
         self.text_projection = clip_model.text_projection
         self.dtype = clip_model.dtype
-
-    def forward(self, prompts, tokenized_prompts):
-
+    def forward(self, prompts, tokenized_prompts)->torch.Tensor:
         x = prompts + self.positional_embedding.type(self.dtype)
-
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_final(x).type(self.dtype)
-
         x = x[torch.arange(x.shape[0]), tokenized_prompts.argmax(dim=-1)] @ self.text_projection
-        
         return x
-
 class Prompts(nn.Module):
     def __init__(self,initials=None):
         super(Prompts,self).__init__()
@@ -72,13 +55,10 @@ class Prompts(nn.Module):
         self.text_encoder = TextEncoder(model)
         if isinstance(initials,list):
             text = clip.tokenize(initials).cuda()
-            # print(text)
             self.embedding_prompt = nn.Parameter(model.token_embedding(text).requires_grad_()).cuda()
         elif isinstance(initials,str):
             prompt_path=initials
-
             state_dict = torch.load(prompt_path)
-            # create new OrderedDict that does not contain `module.`
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
                 name = k[7:] # remove `module.`
@@ -88,10 +68,9 @@ class Prompts(nn.Module):
         else:
             self.embedding_prompt=torch.nn.init.xavier_normal_(nn.Parameter(model.token_embedding([" ".join(["X"]*config.length_prompt)," ".join(["X"]*config.length_prompt)]).requires_grad_())).cuda()
 
-    def forward(self,tensor,flag=1):
+    def forward(self,tensor:torch.Tensor,flag:int=1)->torch.Tensor:
         tokenized_prompts= torch.cat([clip.tokenize(p) for p in [" ".join(["X"]*config.length_prompt)]])
         text_features = self.text_encoder(self.embedding_prompt,tokenized_prompts)
-        
         for i in range(tensor.shape[0]):
             image_features=tensor[i]
             nor=torch.norm(text_features,dim=-1, keepdim=True)
@@ -100,13 +79,13 @@ class Prompts(nn.Module):
                 if(i==0):
                     probs=similarity
                 else:
-                    probs=torch.cat([probs,similarity],dim=0)
+                    probs=torch.cat(tensor=[probs,similarity],dim=0)
             else:
                 similarity = (100.0 * image_features @ (text_features/nor).T).softmax(dim=-1)#/nor
                 if(i==0):
                     probs=similarity[:,0]
                 else:
-                    probs=torch.cat([probs,similarity[:,0]],dim=0)
+                    probs=torch.cat(tensor=[probs,similarity[:,0]],dim=0)
         return probs
 
 def weights_init(m):
@@ -119,17 +98,13 @@ def weights_init(m):
 
 def random_crop(img):
     b,c,h,w=img.shape
-    hs=random.randint(0,h-224)
-    hw=random.randint(0,w-224)
+    hs=random.randint(a=0,b=h-224)
+    hw=random.randint(a=0,b=w-224)
     return img[:,:,hs:hs+224,hw:hw+224]
 
 def train(config):
-    
-    #load model
-    U_net=model_small.UNet_emb_oneBranch_symmetry_noreflect(3,1).cuda()
-  
+    U_net=model_small.UNet_emb_oneBranch_symmetry_noreflect(in_channels=3,out_channels=1).cuda()
     iqa_metric = pyiqa.create_metric('psnr', test_y_channel=True, color_space='ycbcr').to(device)
-    
     #add pretrained model weights
     if config.load_pretrain_prompt == True:
         learn_prompt=Prompts(config.prompt_pretrain_dir).cuda()
@@ -159,8 +134,6 @@ def train(config):
             print("WARNING: For training from scratch, num_reconstruction_iters should not lower than 200 iterations!\nAutomatically reset num_reconstruction_iters to 1000 iterations...")
             config.num_reconstruction_iters=1000
     U_net= torch.nn.DataParallel(U_net)
-    
-    #load dataset
     train_dataset = dataloader_sharp.lowlight_loader(config.lowlight_images_path,config.overlight_images_path)    #dataloader
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.train_batch_size, shuffle=True, num_workers=config.num_workers, pin_memory=True)
     
@@ -198,7 +171,6 @@ def train(config):
     rounds=0
     reconstruction_iter=0
     reinit_flag=0
-    
     #Start training!
     for epoch in range(config.num_epochs):
         if total_iteration<config.num_clip_pretrained_iters:

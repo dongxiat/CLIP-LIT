@@ -17,7 +17,7 @@ def get_clip_score(tensor,words):
 	score=0
 	for i in range(tensor.shape[0]):
 		#image preprocess
-		clip_normalizer = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
+		clip_normalizer = transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073),std= (0.26862954, 0.26130258, 0.27577711))
 		img_resize = transforms.Resize((224,224))
 		image2=img_resize(tensor[i])
 		image=clip_normalizer(image2).unsqueeze(0)
@@ -39,7 +39,7 @@ class L_clip(nn.Module):
 		for param in self.parameters(): 
 			param.requires_grad = False
   
-	def forward(self, x, light):
+	def forward(self, x:torch.Tensor, light:bool)->torch.Tensor:
 		k1 = get_clip_score(x,["dark","normal light"])
 		if light:
 			k2 = get_clip_score(x,["noisy photo","clear photo"])
@@ -49,6 +49,7 @@ class L_clip(nn.Module):
 class Prompts(nn.Module):
 	def __init__(self,initials=None):
 		super(Prompts,self).__init__()
+		self.probs=None
 		if initials!=None:
 			text = clip.tokenize(initials).cuda()
 			with torch.no_grad():
@@ -56,22 +57,21 @@ class Prompts(nn.Module):
 		else:
 			self.text_features=torch.nn.init.xavier_normal_(nn.Parameter(torch.cuda.FloatTensor(2,512))).cuda()
 
-	def forward(self,tensor):
+	def forward(self,tensor:torch.Tensor)->torch.Tensor:
 		for i in range(tensor.shape[0]):
 			image_features=tensor[i]
 			nor=torch.norm(self.text_features,dim=-1, keepdim=True)
 			similarity = (model.logit_scale.exp() * image_features @ (self.text_features/nor).T).softmax(dim=-1)
 			if(i==0):
-				probs=similarity
+				self.probs=similarity
 			else:
-				probs=torch.cat([probs,similarity],dim=0)
-		return probs
+				self.probs=torch.cat(tensors=[self.probs,similarity],dim=0)
+		return self.probs
 
 learn_prompt=Prompts().cuda()
-clip_normalizer = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
+clip_normalizer = transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073),std= (0.26862954, 0.26130258, 0.27577711))
 img_resize = transforms.Resize((224,224))
-
-def get_clip_score_from_feature(tensor,text_features):
+def get_clip_score_from_feature(tensor,text_features)->torch.Tensor:
 	score=0
 	for i in range(tensor.shape[0]):
 		image2=img_resize(tensor[i])
@@ -94,7 +94,7 @@ class L_clip_from_feature(nn.Module):
 		for param in self.parameters(): 
 			param.requires_grad = False
   
-	def forward(self, x, text_features):
+	def forward(self, x, text_features)->torch.Tensor:
 		k1 = get_clip_score_from_feature(x,text_features)
 		return k1
 
@@ -133,7 +133,7 @@ class L_clip_MSE(nn.Module):
 		for param in self.parameters(): 
 			param.requires_grad = False
 		
-	def forward(self, pred, inp,weight=[1.0,1.0,1.0,1.0,0.5]):
+	def forward(self, pred, inp,weight:[float]=[1.0,1.0,1.0,1.0,0.5]):
 		res = get_clip_score_MSE(pred,inp,weight)
 		return res
 
