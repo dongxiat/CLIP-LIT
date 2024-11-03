@@ -9,11 +9,14 @@ import torchvision
 import torch.backends.cudnn as cudnn
 import torch.optim
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import model_small
 import numpy as np
 from PIL import Image
 import glob
 import time
+from tqdm import tqdm
 
 # --- Parse hyper-parameters  --- #
 parser = argparse.ArgumentParser(description='PyTorch implementation of CLIP-LIT (liang. 2023)')
@@ -61,15 +64,15 @@ def lowlight(image_path):
 	torchvision.utils.save_image(enhanced_image, result_path)
 	
 if __name__ == '__main__':
-	with torch.no_grad():
-		filePath = args.input
-		file_list = os.listdir(filePath)
-		print(file_list)
-  
-		for file_name in file_list:
-			image=filePath+file_name
-			print(image)
-			lowlight(image)
-
+    with torch.no_grad():
+        filePath = args.input
+        file_list = os.listdir(filePath)
+        # Sắp xếp danh sách file theo thứ tự tên file
+        file_list = sorted(file_list)
+        print("Sorted file list:", file_list)
+        
+        for file_name in tqdm(file_list, desc="Processing images"):
+            image = os.path.join(filePath, file_name)
+            lowlight(image)
 		
 
